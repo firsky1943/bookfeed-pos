@@ -1,10 +1,11 @@
 // 離線快取：App 外殼（HTML/圖示）存在 iPad，斷網也能開啟。
 // 改版時把 CACHE 版本號 +1，下次有網路開啟時會自動更新。
-const CACHE = 'bkpos-v3';
+const CACHE = 'bkpos-v5';
 const FILES = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './logo.png'];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)));
+  // cache:'reload' 跳過瀏覽器 HTTP 快取，確保抓到 GitHub 上的新檔
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES.map(u => new Request(u, { cache: 'reload' })))));
   self.skipWaiting();
 });
 
