@@ -113,7 +113,30 @@ td.neg{color:var(--bad);font-weight:700}
 .note{font-size:14px;color:var(--mute);margin-top:8px}
 @media (max-width:900px) and (min-width:701px){.pos{grid-template-columns:1fr 310px}.sec{font-size:14px;padding:10px 4px}}
 @media (max-width:1050px){.icoBtn .lb{display:none}.brand span{font-size:17px}.brand img{height:36px}}
-@media (max-width:700px){.pos{grid-template-columns:1fr;grid-template-rows:1fr auto}.side{border-left:0;border-top:1px solid var(--line);max-height:55dvh}.top{grid-template-columns:1fr}.tr{justify-content:flex-start}.sync{max-width:none;flex:1}}
+.sideTgl{display:none}
+@media (max-width:700px){.pos{grid-template-columns:1fr;grid-template-rows:1fr auto}.side{border-left:0;border-top:1px solid var(--line);max-height:55dvh}.top{grid-template-columns:1fr}.tr{justify-content:flex-start}.sync{max-width:none;flex:1}
+  /* v1.2.0 手機：Logo 隱藏、頂列壓成兩列，按鈕縮小 */
+  .brand{display:none}
+  .top{gap:6px;padding:6px 10px}
+  .tl,.tr{gap:6px}
+  .locBtn{padding:8px 12px;font-size:16px;border-radius:10px}
+  .dateBox{padding:7px 10px;font-size:15px;border-radius:10px}
+  .sync{padding:7px 10px;font-size:14px}
+  .icoBtn{padding:7px 10px;font-size:15px;border-radius:10px}
+  /* 商品格兩欄：390 → (390−24−12)/2=177、360 → 162，皆 ≥160 */
+  .prod{padding:10px 12px 16px}
+  .grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+  .tile{min-height:116px;padding:12px}
+  .tile .nm{font-size:18px}
+  /* 購物車收合：平時只留「金額＋結帳」一列，付款方式等到結帳才展開 */
+  .sideTgl{display:block;width:100%;border:0;background:var(--card);color:var(--mute);font-size:13px;padding:5px 0 0}
+  .side:not(.open) .cart,.side:not(.open) .pays,.side:not(.open) .foot>.row{display:none}
+  .side:not(.open) .foot{display:flex;gap:10px;align-items:center;padding:6px 12px calc(8px + env(safe-area-inset-bottom))}
+  .side:not(.open) .sum{flex:1;margin:0}
+  .side:not(.open) .sum .amt{font-size:28px}
+  .side:not(.open) .big{width:auto;flex:1.2;padding:14px 10px;font-size:20px}
+  .side.open{max-height:75dvh}
+}
 </style>
 </head>
 <body>
@@ -135,7 +158,8 @@ td.neg{color:var(--bad);font-weight:700}
   </div>
   <div class="pos">
     <div class="prod"><div class="grid" id="tiles"></div></div>
-    <div class="side">
+    <div class="side" id="side">
+      <button class="sideTgl" id="sideTgl">▲ 購物車明細與付款方式</button>
       <div class="cart" id="cart"></div>
       <div class="foot">
         <div class="pays" id="pays"></div>
@@ -151,9 +175,10 @@ td.neg{color:var(--bad);font-weight:700}
   </div>
 </div>
 
-<!-- 據點 -->
+<!-- 通路（v1.2.0 起不持有庫存，只是銷售標籤） -->
 <div class="sheet" id="s-loc"><div class="panel">
-  <div class="ph"><h2>現在在哪裡？</h2><button class="x" data-close>關閉</button></div>
+  <div class="ph"><h2>現在在哪個通路銷售？</h2><button class="x" data-close>關閉</button></div>
+  <div class="note" style="margin:-4px 0 12px">通路只用來標記銷售來源；庫存一律以主倉計算，切換通路不影響庫存數字。</div>
   <div class="locs" id="locList"></div>
 </div></div>
 
@@ -174,8 +199,6 @@ td.neg{color:var(--bad);font-weight:700}
   <div class="ph"><h2>庫存作業</h2><button class="x" data-close>關閉</button></div>
   <div class="chips" id="opKinds"></div>
   <div class="note" id="opHint"></div>
-  <div id="fromBox"><div class="lbl">從</div><div class="chips" id="opFrom"></div></div>
-  <div id="toBox"><div class="lbl">到</div><div class="chips" id="opTo"></div></div>
   <div class="lbl">品項與數量</div>
   <div id="opLots"></div>
   <div class="lbl">備註（可空白）</div>
@@ -226,10 +249,10 @@ td.neg{color:var(--bad);font-weight:700}
 <div id="toast"></div>
 
 <script>
-const VER='1.1.1';
+const VER='1.2.0';
 const LS={cfg:'bk_cfg',boot:'bk_boot',srv:'bk_srv',q:'bk_q',log:'bk_log'};
 const PAYS=['現金','LINE Pay','轉帳'];
-const KINDS=[['move','調撥'],['back','收攤退回'],['in','進貨'],['gift','試吃/贈品'],['scrap','報廢']];
+const KINDS=[['in','進貨'],['gift','試吃/贈品'],['scrap','報廢']];   // v1.2.0 移除調撥／收攤退回：庫存只在主倉
 const MASTER=new Set(['product','lot','bundle']);
 const MAX_PROD=30,MAX_LOT=60;   // DASHBOARD【二】【一】公式範圍上限
 const WD='日一二三四五六';
@@ -257,20 +280,19 @@ const prodOf=sku=>BOOT&&BOOT.products&&BOOT.products[sku];
 const priceOf=l=>{const p=l&&prodOf(l.sku);return p?Number(p.price)||0:(Number(l&&l.price)||0)};
 const shortOf=l=>{const p=l&&prodOf(l.sku);return p?p.short:(l&&(l.short||l.sku))||''};
 const gkey=sku=>{const p=prodOf(sku);return (p&&p.group||'').trim()||sku};
-const stockAt=(l,w)=>(l&&l.stock&&l.stock[w])||0;
+const totalOf=l=>(l&&Number(l.total))||0;   // v1.2.0：每個批號只有一個總庫存（主倉）
 const locNames=()=>BOOT?BOOT.locations.map(l=>l.name):[];
-const mainLoc=()=>locNames()[0]||'';
+const mainLoc=()=>(BOOT&&BOOT.main)||locNames()[0]||'';   // 主倉＝M_Location B2（後端回傳 main）
 
 /* ---------- 資料層：SRV ＋ 待上傳佇列 → BOOT ---------- */
+/** 每筆交易對總庫存的增減 [批號, 數量]；不分據點／通路 */
 function deltas(p){const o=[];(p.lines||[]).forEach(x=>{
-  if(p.kind==='sale'||p.kind==='gift')o.push([x.lot,p.loc,-x.qty]);
-  if(p.kind==='scrap')o.push([x.lot,p.from,-x.qty]);
-  if(p.kind==='in')o.push([x.lot,p.to,x.qty]);
-  if(p.kind==='move'){o.push([x.lot,p.from,-x.qty]);o.push([x.lot,p.to,x.qty])}});
-  if(p.kind==='lot'&&+p.qty>0)o.push([p.lot,p.to,+p.qty]);
+  if(p.kind==='sale'||p.kind==='gift'||p.kind==='scrap')o.push([x.lot,-x.qty]);
+  if(p.kind==='in')o.push([x.lot,+x.qty])});
+  if(p.kind==='lot'&&+p.qty>0)o.push([p.lot,+p.qty]);
   return o}
-function applyDelta(B,p,sign){deltas(p).forEach(([lot,w,d])=>{const l=B.lots.find(x=>x.lot===lot);if(!l)return;l.stock=l.stock||{};
-  l.stock[w]=(l.stock[w]||0)+d*sign;l.total=(l.total||0)+d*sign})}
+function applyDelta(B,p,sign){deltas(p).forEach(([lot,d])=>{const l=B.lots.find(x=>x.lot===lot);if(!l)return;
+  l.total=(Number(l.total)||0)+d*sign})}
 function applyMaster(B,p){
   B.products=B.products||{};B.bundles=B.bundles||{};
   if(p.kind==='product'){
@@ -283,7 +305,7 @@ function applyMaster(B,p){
   if(p.kind==='lot'&&!B.lots.some(l=>l.lot===p.lot)){
     const pr=B.products[p.sku]||{};
     B.lots.push({lot:p.lot,sku:p.sku,mfg:p.mfg||'',expiry:p.exp,cost:+p.cost||0,display:(pr.short||p.sku)+' / '+p.lot.slice(-4),
-      days:null,grade:'',stock:{},total:0,price:pr.price||0,short:pr.short||p.sku});
+      days:null,grade:'',total:0,price:pr.price||0,short:pr.short||p.sku});
   }
 }
 function rebuild(){
@@ -298,6 +320,20 @@ function rebuild(){
 (function migrate(){   // v1.0 只存 BOOT（已含待上傳），還原出 SRV
   if(SRV)return;const old=ls(LS.boot);if(!old)return;
   SRV=clone(old);Q().forEach(p=>applyDelta(SRV,p,-1));ls(LS.srv,SRV);
+})();
+(function dropMoves(){   // v1.2.0：舊版留在佇列的調撥（含收攤退回）不再上傳；調撥對總庫存是 ±N 抵銷，丟棄不影響數字
+  try{
+    const q=Q(),mv=q.filter(p=>p&&p.kind==='move');if(!mv.length)return;
+    ls(LS.q,q.filter(p=>!(p&&p.kind==='move')));
+    const L=ls(LS.log)||[];
+    mv.forEach(p=>{const n='v1.2.0 已停用調撥，此筆未上傳（不影響總庫存）',i=L.findIndex(x=>x.txId===p.txId);
+      if(i>=0)Object.assign(L[i],{st:'undo',note:n});
+      else L.unshift({txId:p.txId,t:'',summary:'調撥 '+(p.lines||[]).reduce((s,x)=>s+(+x.qty||0),0)+' 包 '+(p.from||'')+'→'+(p.to||''),st:'undo',note:n})});
+    ls(LS.log,L.slice(0,300));
+  }catch(e){console.warn('清除舊調撥失敗',e)}
+})();
+(function stripLocStock(){   // v1.2.0：移除舊快照裡的分據點庫存
+  if(!SRV||!SRV.lots)return;let ch=false;SRV.lots.forEach(l=>{if('stock' in l){delete l.stock;ch=true}});if(ch)ls(LS.srv,SRV);
 })();
 rebuild();
 
@@ -357,7 +393,7 @@ function saleLines(){
 /* ---------- 銷售畫面 ---------- */
 function renderTop(){
   $('#brandName').textContent=CFG.brand||'';document.title=(CFG.brand||'照書養')+' POS';
-  $('#locBtn').textContent='📍 '+(CFG.loc||'選擇據點');
+  $('#locBtn').textContent='📍 '+(CFG.loc||'選擇通路');
   const d=new Date(curDate()+'T00:00');
   $('#dateTxt').textContent=(dateOverride?'補登 ':'')+(d.getMonth()+1)+'/'+d.getDate()+'（'+WD[d.getDay()]+'）';
   $('#dateBox').classList.toggle('alt',!!dateOverride);
@@ -368,7 +404,7 @@ function renderTiles(){
   if(!BOOT.lots.length){$('#tiles').innerHTML='<div class="empty" style="grid-column:1/-1">還沒有商品，按右上 🏷 新增商品</div>';return}
   const L=[...BOOT.lots].sort((a,b)=>String(a.expiry).localeCompare(b.expiry)); // 先到期先出 FEFO
   $('#tiles').innerHTML=L.map(l=>{
-    const n=stockAt(l,CFG.loc),c=cart.find(x=>x.lot===l.lot);
+    const n=totalOf(l),c=cart.find(x=>x.lot===l.lot);
     const tag=(l.grade&&l.grade!=='正常'?` <span class="tag">${esc(l.grade)}</span>`:'')+(l.pending?' <span class="tag new">未上傳</span>':'');
     const hasB=((BOOT.bundles||{})[gkey(l.sku)]||[]).length;
     return `<button class="tile${c?' sel':''}" data-lot="${esc(l.lot)}">${c?`<span class="cnt">${c.qty}</span>`:''}
@@ -393,9 +429,16 @@ function renderCart(){
   $('#padBtn').classList.toggle('on',paid!=null&&!gift);
   $('#giftBtn').classList.toggle('on',gift);
   $('#checkout').disabled=!cart.length;
-  $('#checkout').textContent=gift?'記錄試吃/贈品':'結帳';
+  if(!cart.length)setSide(false);
+  $('#checkout').textContent=(gift?'記錄試吃/贈品':'結帳')+(isPhone()&&!sideOpen?' ›':'');
   renderTiles();
 }
+/* 手機（≤700px）：購物車平時收合，按「結帳 ›」或上方把手才展開付款方式；iPad 不受影響 */
+const isPhone=()=>window.matchMedia('(max-width:700px)').matches;
+let sideOpen=false;
+function setSide(o){sideOpen=!!o;$('#side').classList.toggle('open',sideOpen);
+  $('#sideTgl').textContent=sideOpen?'▼ 收合':'▲ 購物車明細與付款方式'}
+$('#sideTgl').addEventListener('click',()=>{setSide(!sideOpen);renderCart()});
 $('#tiles').addEventListener('click',e=>{
   const t=e.target.closest('.tile');if(!t)return;
   if(!CFG.loc)return openSheet('loc');
@@ -412,6 +455,7 @@ $('#giftBtn').addEventListener('click',()=>{gift=!gift;renderCart()});
 $('#clearBtn').addEventListener('click',()=>{cart=[];paid=null;gift=false;renderCart()});
 $('#checkout').addEventListener('click',()=>{
   if(!cart.length)return;
+  if(isPhone()&&!sideOpen){setSide(true);renderCart();return}
   const q=cart.reduce((s,c)=>s+c.qty,0);
   const lines=gift?cart.map(c=>({lot:c.lot,qty:c.qty})):saleLines();
   const amt=gift?0:lines.reduce((s,x)=>s+x.amount,0);
@@ -420,7 +464,7 @@ $('#checkout').addEventListener('click',()=>{
     summary:gift?`試吃/贈品 ${q} 包 @${CFG.loc}`:`銷售 ${q} 包 ${money(amt)} ${pay} @${CFG.loc}`}]);
   if(!ok)return;
   flash(gift?`✓ 已記錄 ${q} 包`:`✓ ${money(amt)}　${pay}`);
-  cart=[];paid=null;gift=false;renderCart();
+  cart=[];paid=null;gift=false;setSide(false);renderCart();
 });
 
 /* 改實收（數字鍵盤） */
@@ -434,7 +478,7 @@ $('#padBtn').addEventListener('click',()=>{if(!cart.length)return toast('先加�
 $('#padReset').addEventListener('click',()=>{paid=null;closeSheets();renderCart()});
 $('#padOk').addEventListener('click',()=>{paid=np===''?null:+np;closeSheets();renderCart()});
 
-/* 據點與日期 */
+/* 通路與日期 */
 $('#locBtn').addEventListener('click',()=>openSheet('loc'));
 function renderLocs(){$('#locList').innerHTML=locNames().map(n=>`<button class="${n===CFG.loc?'on':''}" data-n="${esc(n)}">${esc(n)}</button>`).join('')||'<div class="empty">尚未下載資料</div>'}
 $('#locList').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
@@ -443,48 +487,33 @@ $('#dateInp').addEventListener('change',e=>{const v=e.target.value;dateOverride=
   if(dateOverride)toast('補登模式：之後的交易日期記為 '+v)});
 
 /* ---------- 庫存作業 ---------- */
-let OP={kind:'move',from:'',to:'',qty:{}};
-function setKind(k){
-  const L=locNames(),here=CFG.loc,main=mainLoc();
-  OP={kind:k,from:'',to:'',qty:{}};
-  if(k==='move'){OP.from=main;OP.to=here!==main?here:(L[1]||'')}
-  if(k==='back'){OP.from=here;OP.to=main;BOOT.lots.forEach(l=>{const n=stockAt(l,here);if(n>0)OP.qty[l.lot]=n})}
-  if(k==='in')OP.to=main;
-  if(k==='gift'||k==='scrap')OP.from=here;
-  renderOps();
-}
+let OP={kind:'in',qty:{}};
+function setKind(k){OP={kind:k,qty:{}};renderOps()}
 function renderOps(){
-  const k=OP.kind,L=locNames();
+  const k=OP.kind,main=mainLoc()||'主倉';
   $('#opKinds').innerHTML=KINDS.map(([v,n])=>`<button class="chip${v===k?' on':''}" data-k="${v}">${n}</button>`).join('');
-  $('#opHint').textContent={move:'出發備貨：主倉 → 展場；交貨給合夥人：主倉 → 合夥人',
-    back:'收攤時用。數量已帶入帳上剩餘，請改成實際點數後送出',in:'既有批號補貨。全新批號請到 🏷 商品 → 編輯 → ＋新批號',
-    gift:'試吃、公關品：扣庫存、不計營收',scrap:'破損、過期'}[k];
-  const showFrom=k!=='in',showTo=k==='move'||k==='back'||k==='in';
-  $('#fromBox').style.display=showFrom?'':'none';$('#toBox').style.display=showTo?'':'none';
-  $('#opFrom').innerHTML=L.map(n=>`<button class="chip${n===OP.from?' on':''}" data-n="${esc(n)}">${esc(n)}</button>`).join('');
-  $('#opTo').innerHTML=L.map(n=>`<button class="chip${n===OP.to?' on':''}" data-n="${esc(n)}">${esc(n)}</button>`).join('');
-  const ref=k==='in'?OP.to:OP.from;
+  $('#opHint').textContent={in:`既有批號補貨，入${main}。全新批號請到 🏷 商品 → 編輯 → ＋新批號`,
+    gift:`試吃、公關品：從${main}扣庫存、不計營收（目前通路「${CFG.loc||'未選'}」記在備註）`,
+    scrap:`破損、過期：從${main}扣庫存`}[k];
   $('#opLots').innerHTML=BOOT.lots.map(l=>{const v=OP.qty[l.lot]||0;return `<div class="olot">
-    <div class="nm">${esc(shortOf(l))}<small>批 ${esc(l.lot.slice(-4))}・${esc(ref)} 帳上 ${stockAt(l,ref)}</small></div>
+    <div class="nm">${esc(shortOf(l))}<small>批 ${esc(l.lot.slice(-4))}・帳上 ${totalOf(l)}</small></div>
     <button class="st" data-l="${esc(l.lot)}" data-d="-1">−</button><b class="q">${v}</b>
     <button class="st" data-l="${esc(l.lot)}" data-d="1">＋</button><button class="plus10" data-l="${esc(l.lot)}" data-d="10">+10</button></div>`}).join('');
   const tot=Object.values(OP.qty).reduce((s,n)=>s+n,0);
   $('#opSubmit').textContent=tot?`送出 ${tot} 包`:'送出';$('#opSubmit').disabled=!tot;
 }
 $('#opKinds').addEventListener('click',e=>{const b=e.target.closest('.chip');if(b)setKind(b.dataset.k)});
-$('#opFrom').addEventListener('click',e=>{const b=e.target.closest('.chip');if(b){OP.from=b.dataset.n;renderOps()}});
-$('#opTo').addEventListener('click',e=>{const b=e.target.closest('.chip');if(b){OP.to=b.dataset.n;renderOps()}});
 $('#opLots').addEventListener('click',e=>{const b=e.target.closest('[data-l]');if(!b)return;
   OP.qty[b.dataset.l]=Math.max(0,(OP.qty[b.dataset.l]||0)+ +b.dataset.d);renderOps()});
 $('#opSubmit').addEventListener('click',()=>{
   const lines=Object.entries(OP.qty).filter(([,n])=>n>0).map(([lot,qty])=>({lot,qty}));
   if(!lines.length)return;
-  const kind=OP.kind==='back'?'move':OP.kind;
-  if(kind==='move'&&OP.from===OP.to)return toast('「從」和「到」不能相同');
-  const tot=lines.reduce((s,x)=>s+x.qty,0),name=KINDS.find(x=>x[0]===OP.kind)[1];
-  const path=kind==='move'?`${OP.from}→${OP.to}`:kind==='in'?`→${OP.to}`:`@${OP.from}`;
-  if(!enqueue([{p:{txId:uid(),kind,date:curDate(),loc:OP.from,from:OP.from,to:OP.to,operator:CFG.op,
-    note:$('#opNote').value.trim()||(OP.kind==='back'?'收攤退回':''),lines},summary:`${name} ${tot} 包 ${path}`}]))return;
+  const kind=OP.kind;
+  if(!['in','gift','scrap'].includes(kind))return toast('未知作業類型');
+  const tot=lines.reduce((s,x)=>s+x.qty,0),name=KINDS.find(x=>x[0]===kind)[1],main=mainLoc();
+  const path=kind==='in'?`→${main}`:kind==='gift'?`@${main}（通路 ${CFG.loc||'—'}）`:`@${main}`;
+  if(!enqueue([{p:{txId:uid(),kind,date:curDate(),loc:CFG.loc,operator:CFG.op,
+    note:$('#opNote').value.trim(),lines},summary:`${name} ${tot} 包 ${path}`}]))return;
   $('#opNote').value='';closeSheets();flash(`✓ ${name} ${tot} 包`);
 });
 
@@ -498,12 +527,11 @@ function lotFields(){
   <div><div class="lbl">進貨成本（每包）＊</div><input class="inp" id="lCost" type="number" inputmode="decimal" step="0.01"></div>
   <div><div class="lbl">製造日</div><input class="inp" id="lMfg" type="date"></div>
   <div><div class="lbl">效期＊</div><input class="inp" id="lExp" type="date"></div>
-  <div><div class="lbl">進貨數量（可 0）</div><input class="inp" id="lQty" type="number" inputmode="numeric" value="0"></div></div>
-  <div class="lbl">入庫據點</div><div class="chips" id="lTo">${locNames().map(n=>`<button class="chip${n===mainLoc()?' on':''}" data-to="${esc(n)}">${esc(n)}</button>`).join('')}</div>`;
+  <div><div class="lbl">進貨數量（可 0，入${esc(mainLoc()||'主倉')}）</div><input class="inp" id="lQty" type="number" inputmode="numeric" value="0"></div></div>`;
 }
 function readLot(sku){
   const lot=$('#lId').value.trim(),cost=$('#lCost').value,exp=$('#lExp').value,mfg=$('#lMfg').value,qty=$('#lQty').value===''?0:+$('#lQty').value;
-  const to=($('#lTo .chip.on')||{}).dataset?.to||mainLoc();
+  const to=mainLoc();   // v1.2.0：入庫一律主倉（後端也固定寫主倉）
   if(!lot)return toast('請填批號');
   if(lotOf(lot))return toast('批號 '+lot+' 已存在，請換一個');
   if(cost===''||!(+cost>=0))return toast('請填進貨成本');
@@ -570,7 +598,6 @@ $('#prodBody').addEventListener('input',e=>{
 });
 $('#prodBody').addEventListener('click',e=>{
   const tc=e.target.closest('[data-temp]');if(tc){document.querySelectorAll('#fTemp .chip').forEach(c=>c.classList.toggle('on',c===tc));return}
-  const lc=e.target.closest('[data-to]');if(lc){document.querySelectorAll('#lTo .chip').forEach(c=>c.classList.toggle('on',c===lc));return}
   const b=e.target.closest('[data-pa]');if(!b)return;const a=b.dataset.pa;
   if(a==='new'){
     if(Object.keys(BOOT.products).length>=MAX_PROD)return toast('商品已達 '+MAX_PROD+' 個（DASHBOARD 上限），請先擴充試算表公式');
@@ -619,10 +646,9 @@ $('#prodBack').addEventListener('click',()=>{if(PV.view==='list')closeSheets();e
 /* ---------- 庫存表 ---------- */
 function renderStock(){
   if(!BOOT){$('#stockTbl').innerHTML='';return}
-  const L=locNames();
-  $('#stockTbl').innerHTML=`<tr><th>商品 / 批</th>${L.map(n=>`<th>${esc(n)}</th>`).join('')}<th>總計</th></tr>`+
-    BOOT.lots.map(l=>`<tr><td>${esc(shortOf(l))} /${esc(l.lot.slice(-4))}<br><small style="color:var(--mute)">${esc(l.expiry)}・${esc(l.pending?'未上傳':l.grade)}</small></td>
-    ${L.map(n=>{const v=stockAt(l,n);return `<td class="${v<0?'neg':''}">${v}</td>`}).join('')}<td><b>${l.total||0}</b></td></tr>`).join('');
+  $('#stockTbl').innerHTML=`<tr><th>商品 / 批</th><th>庫存（${esc(mainLoc()||'主倉')}）</th></tr>`+
+    BOOT.lots.map(l=>{const v=totalOf(l);return `<tr><td>${esc(shortOf(l))} /${esc(l.lot.slice(-4))}<br><small style="color:var(--mute)">${esc(l.expiry)}・${esc(l.pending?'未上傳':l.grade)}</small></td>
+    <td class="${v<0?'neg':''}"><b>${v}</b></td></tr>`}).join('');
   const n=Q().length;
   $('#stockNote').textContent=(n?`含 ${n} 筆尚未上傳的變更。`:'')+(SRV&&SRV.serverTime?`試算表資料時間：${SRV.today} ${SRV.serverTime}`:'');
 }
@@ -647,7 +673,7 @@ function remapSku(a,b){
     return p});
   ls(LS.q,q);
 }
-function setSrvStock(s){if(!s||!SRV)return;SRV.lots.forEach(l=>{const x=s[l.lot];if(x){l.stock=x.by;l.total=x.total}})}
+function setSrvStock(s){if(!s||!SRV)return;SRV.lots.forEach(l=>{const x=s[l.lot];if(x){delete l.stock;l.total=Number(x.total)||0}})}
 async function flush(){
   if(flushing||!CFG.api||!SRV)return;flushing=true;setSync();let needBoot=false;
   try{for(;;){
@@ -695,7 +721,7 @@ $('#syncBtn').addEventListener('click',()=>{flush();openSheet('log')});
 /* ---------- 設定 ---------- */
 function renderSet(){
   $('#cfgApi').value=CFG.api;$('#cfgPin').value=CFG.pin;$('#cfgOp').value=CFG.op;$('#cfgBrand').value=CFG.brand||'';
-  $('#cfgInfo').textContent=`版本 ${VER}・待上傳 ${Q().length} 筆・`+(BOOT?`${Object.keys(BOOT.products).length} 個商品 / ${BOOT.lots.length} 個批號 / ${BOOT.locations.length} 個據點`:'尚未下載資料');
+  $('#cfgInfo').textContent=`版本 ${VER}・待上傳 ${Q().length} 筆・`+(BOOT?`${Object.keys(BOOT.products).length} 個商品 / ${BOOT.lots.length} 個批號 / ${Math.max(0,BOOT.locations.length-1)} 個通路（＋主倉）`:'尚未下載資料');
 }
 $('#cfgSave').addEventListener('click',async()=>{
   CFG.api=$('#cfgApi').value.trim();CFG.pin=$('#cfgPin').value.trim();CFG.op=$('#cfgOp').value.trim();CFG.brand=$('#cfgBrand').value.trim();saveCfg();renderTop();
@@ -711,7 +737,7 @@ const isOpen=n=>$('#s-'+n).classList.contains('open');
 function openSheet(n){
   if((n==='ops'||n==='stock'||n==='prod')&&!BOOT)return toast('請先到設定下載資料');
   closeSheets();
-  if(n==='ops')setKind('move');if(n==='stock')renderStock();if(n==='log')renderLog();if(n==='set')renderSet();if(n==='loc')renderLocs();
+  if(n==='ops')setKind('in');if(n==='stock')renderStock();if(n==='log')renderLog();if(n==='set')renderSet();if(n==='loc')renderLocs();
   if(n==='prod'){PV={view:'list'};renderProd()}
   $('#s-'+n).classList.add('open');
 }
